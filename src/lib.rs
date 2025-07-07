@@ -1,7 +1,7 @@
-//! Zygisk Dump Dex — stable-Rust 版  
-//! 兼容 Rust 1.88 及以上；不再依赖 `#![feature(naked_functions)]`
+//! Zygisk Dump Dex — stable-Rust 版
+//! 兼容 Rust 1.88 及以上，无需任何 nightly 特性
 
-// ───────────────────────────── 依赖 ─────────────────────────────
+// ─── 依赖 ────────────────────────────────────────────────────────────
 use dobby_rs::Address;
 use jni::JNIEnv;
 use log::{error, info, trace};
@@ -15,7 +15,7 @@ use zygisk_rs::{
     register_zygisk_module, Api, AppSpecializeArgs, Module, ServerSpecializeArgs,
 };
 
-// ─────────────────────────── Zygisk 模块实现 ──────────────────────────
+// ─── Zygisk 模块实现 ─────────────────────────────────────────────────
 struct MyModule {
     api: Api,
     env: JNIEnv<'static>,
@@ -34,7 +34,7 @@ impl Module for MyModule {
 
     fn pre_app_specialize(&mut self, args: &mut AppSpecializeArgs) {
         let mut inner = || -> anyhow::Result<()> {
-            // ① 取包名
+            // ① 获取包名
             let package_name = self
                 .env
                 .get_string(unsafe {
@@ -45,9 +45,9 @@ impl Module for MyModule {
                 })?
                 .to_string_lossy()
                 .to_string();
-            trace!("pre_app_specialize: package_name = {package_name}");
+            trace!("pre_app_specialize: {package_name}");
 
-            // ② list.txt 白名单检查
+            // ② list.txt 白名单
             let module_dir = self
                 .api
                 .get_module_dir()
@@ -65,7 +65,7 @@ impl Module for MyModule {
             if !buf.lines().any(|l| l.trim() == package_name) {
                 self.api
                     .set_option(zygisk_rs::ModuleOption::DlcloseModuleLibrary);
-                return Ok(()); // 不在名单直接卸载模块
+                return Ok(());
             }
 
             info!("dump dex for {package_name}");
@@ -77,7 +77,7 @@ impl Module for MyModule {
             )
             .ok_or_else(|| anyhow::anyhow!("resolve symbol error"))?;
 
-            info!("OpenCommon addr = {open_common:#x}");
+            info!("OpenCommon addr = {:#x}", open_common as usize);
             unsafe {
                 OLD_OPEN_COMMON =
                     dobby_rs::hook(open_common, new_open_common_wrapper as Address)? as usize;
@@ -100,8 +100,8 @@ register_zygisk_module!(MyModule);
 // 保存原函数指针
 static mut OLD_OPEN_COMMON: usize = 0;
 
-// ────────────────────── 裸包装函数（stable 语法） ─────────────────────
-/// 裸函数：保存寄存器 → 调自定义逻辑 → 跳回原函数
+// ─── 裸包装函数（stable 语法） ───────────────────────────────────────
+/// 保存寄存器 → 调用自定义逻辑 → 跳回原函数
 #[naked]
 pub unsafe extern "C" fn new_open_common_wrapper() -> ! {
     core::arch::naked_asm!(
@@ -116,11 +116,11 @@ pub unsafe extern "C" fn new_open_common_wrapper() -> ! {
         stp x8,  x9,  [sp, #0x50]
 
         // 调用自定义逻辑
-        mov x0, x1          // base
-        mov x1, x2          // size
+        mov x0, x1      // base
+        mov x1, x2      // size
         bl  {new_open_common}
 
-        // 还原寄存器并跳回原函数
+        // 还原寄存器并返回原函数
         ldp x29, x30, [sp, #0]
         ldp x0,  x1,  [sp, #0x10]
         ldp x2,  x3,  [sp, #0x20]
@@ -134,18 +134,16 @@ pub unsafe extern "C" fn new_open_common_wrapper() -> ! {
         br   x16
         "#,
         new_open_common = sym new_open_common,
-        old_open_common = sym OLD_OPEN_COMMON,
-        options(noreturn)
+        old_open_common = sym OLD_OPEN_COMMON
     )
 }
 
-// ────────────────────── 自定义逻辑：写 dex 文件 ─────────────────────
+// ─── 自定义逻辑：把 dex 写到 /data/data/<pkg>/dexes ───────────────────
 extern "C" fn new_open_common(base: usize, size: usize) {
     info!("find dex: base=0x{base:x}, size=0x{size:x}");
 
     let dex_data = unsafe { core::slice::from_raw_parts(base as *const u8, size) };
 
-    // 读取进程包名
     let cmdline = match std::fs::read_to_string("/proc/self/cmdline") {
         Ok(c) => c,
         Err(e) => {
@@ -158,14 +156,12 @@ extern "C" fn new_open_common(base: usize, size: usize) {
         return;
     };
 
-    // 目录 /data/data/<pkg>/dexes
     let dir = format!("/data/data/{package}/dexes");
     if let Err(e) = std::fs::create_dir_all(&dir) {
         error!("create dir error: {e:?}");
         return;
     }
 
-    // 以 CRC-32 作为文件名
     let crc = crc::Crc::<u32>::new(&crc::CRC_32_CD_ROM_EDC);
     let mut digest = crc.digest();
     digest.update(dex_data);
