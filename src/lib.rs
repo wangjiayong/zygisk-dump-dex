@@ -10,6 +10,7 @@ use jni::JNIEnv;
 use log::{error, info, trace};
 use nix::{fcntl::OFlag, sys::stat::Mode};
 use core::arch::asm;                          // ← 替换 naked_asm
+use core::arch::naked_asm;
 use std::{
     fs::File,
     io::Read,
