@@ -19,7 +19,7 @@ jobs:
       - name: Set up Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: nightly
+          toolchain: nightly-2025-05-20
           target: aarch64-linux-android
           override: true
 
