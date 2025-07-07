@@ -111,39 +111,41 @@ static mut OLD_OPEN_COMMON: usize = 0;
 
 // 1. `#[naked]` + `unsafe extern "C" fn` 是新规范
 // 2. 返回类型必须 `!`，并加 `options(noreturn)`
-#[naked]
+#[naked]                                           // ⬅️ 裸函数
 pub unsafe extern "C" fn new_open_common_wrapper() -> ! {
-    asm!(
+    core::arch::naked_asm!(                       // ⬅️ 必须 naked_asm!
+        r#"
         // --- 保存寄存器 / 栈帧 ---------------------------------------------------------
-        "sub sp, sp, 0x280",
-        "stp x29, x30, [sp, #0]",
-        "stp x0, x1,  [sp, #0x10]",
-        "stp x2, x3,  [sp, #0x20]",
-        "stp x4, x5,  [sp, #0x30]",
-        "stp x6, x7,  [sp, #0x40]",
-        "stp x8, x9,  [sp, #0x50]",
+        sub sp, sp, 0x280
+        stp x29, x30, [sp, #0]
+        stp x0,  x1,  [sp, #0x10]
+        stp x2,  x3,  [sp, #0x20]
+        stp x4,  x5,  [sp, #0x30]
+        stp x6,  x7,  [sp, #0x40]
+        stp x8,  x9,  [sp, #0x50]
 
-        // --- 参数转换 & 调用自定义逻辑 -----------------------------------------------
-        "mov x0, x1",      // base
-        "mov x1, x2",      // size
-        "bl  {new_open_common}",
+        // --- 调用自定义逻辑 -----------------------------------------------------------
+        mov x0, x1          // base
+        mov x1, x2          // size
+        bl  {new_open_common}
 
-        // --- 还原寄存器 / 返回原函数 -------------------------------------------------
-        "ldp x29, x30, [sp, #0]",
-        "ldp x0, x1,  [sp, #0x10]",
-        "ldp x2, x3,  [sp, #0x20]",
-        "ldp x4, x5,  [sp, #0x30]",
-        "ldp x6, x7,  [sp, #0x40]",
-        "ldp x8, x9,  [sp, #0x50]",
-        "add sp, sp, 0x280",
+        // --- 还原寄存器并跳回 ---------------------------------------------------------
+        ldp x29, x30, [sp, #0]
+        ldp x0,  x1,  [sp, #0x10]
+        ldp x2,  x3,  [sp, #0x20]
+        ldp x4,  x5,  [sp, #0x30]
+        ldp x6,  x7,  [sp, #0x40]
+        ldp x8,  x9,  [sp, #0x50]
+        add sp, sp, 0x280
 
-        "adrp x16, {old_open_common}",
-        "ldr  x16, [x16, #:lo12:{old_open_common}]",
-        "br   x16",
-        old_open_common  = sym OLD_OPEN_COMMON,
-        new_open_common  = sym new_open_common,
+        adrp x16, {old_open_common}
+        ldr  x16, [x16, #:lo12:{old_open_common}]
+        br   x16
+        "#,
+        new_open_common = sym new_open_common,
+        old_open_common = sym OLD_OPEN_COMMON,
         options(noreturn)
-    );
+    )
 }
 
 // ❺ ──────────────────────────────── 新增逻辑：保存 dex 到 /data/data/包名/dexes ────────
